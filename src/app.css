@@ -1,0 +1,22 @@
+:root {
+  --accent: #0078d4;
+  --bg: rgba(30, 30, 30, 0.95);
+  --surface: rgba(45, 45, 45, 0.95);
+  --text: #e0e0e0;
+  --text-secondary: #9e9e9e;
+  --border: rgba(255, 255, 255, 0.08);
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}

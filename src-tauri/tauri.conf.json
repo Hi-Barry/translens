@@ -20,11 +20,25 @@
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
-        "center": false,
+        "center": true,
         "visible": false,
         "resizable": true,
         "minWidth": 280,
         "minHeight": 200,
+        "shadow": false
+      },
+      {
+        "label": "settings",
+        "title": "TransLens 设置",
+        "url": "settings.html",
+        "width": 480,
+        "height": 540,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": false,
+        "center": true,
+        "visible": false,
+        "resizable": false,
         "shadow": false
       }
     ],

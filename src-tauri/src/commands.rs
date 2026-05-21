@@ -60,9 +60,48 @@ pub async fn translate_text(
     Ok(())
 }
 
+/// Capture selected text from clipboard + open translator window
+#[tauri::command]
+pub async fn capture_and_translate(app: AppHandle) -> Result<(), String> {
+    // Try to capture selected text (Windows only, returns None on Linux)
+    let text = crate::detection::capture_selected_text();
+
+    let text = match text {
+        Some(t) if !t.trim().is_empty() => t,
+        _ => {
+            // If no text captured via Ctrl+C, try direct clipboard read
+            #[cfg(target_os = "windows")]
+            {
+                let clip_text = crate::detection::win::read_clipboard_text().unwrap_or_default();
+                if !clip_text.trim().is_empty() {
+                    clip_text
+                } else {
+                    return Err("未检测到选中文本，请先选择文本后重试".to_string());
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err("文本捕获仅在 Windows 平台可用".to_string());
+            }
+        }
+    };
+
+    // Show the translator window
+    show_translator_window_inner(app, text, 0, 0).await
+}
+
 /// Show the translation popup window
 #[tauri::command]
 pub async fn show_translator_window(
+    app: AppHandle,
+    text: String,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    show_translator_window_inner(app, text, x, y).await
+}
+
+async fn show_translator_window_inner(
     app: AppHandle,
     text: String,
     x: i32,
@@ -73,9 +112,7 @@ pub async fn show_translator_window(
             .set_position(tauri::PhysicalPosition::new(x, y))
             .map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;
-        window
-            .set_focus()
-            .map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
         app.emit("translate-text", &text)
             .map_err(|e| e.to_string())?;
     }
@@ -87,6 +124,31 @@ pub async fn show_translator_window(
 pub async fn hide_translator_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("translator") {
         window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Open the settings window
+#[tauri::command]
+pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("settings") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    } else {
+        // Create settings window on demand
+        use tauri::WebviewWindowBuilder;
+        let _win = WebviewWindowBuilder::new(
+            &app,
+            "settings",
+            tauri::WebviewUrl::App("settings.html".into()),
+        )
+        .title("TransLens 设置")
+        .inner_size(480.0, 540.0)
+        .resizable(false)
+        .center()
+        .visible(true)
+        .build()
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

@@ -32,7 +32,7 @@ pub fn run() {
             // Setup system tray
             setup_tray(app.handle())?;
 
-            // Create overlay handler
+            // Start detection thread (Windows only)
             #[cfg(target_os = "windows")]
             {
                 let handle = app.handle().clone();
@@ -45,8 +45,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::translate_text,
+            commands::capture_and_translate,
             commands::show_translator_window,
             commands::hide_translator_window,
+            commands::open_settings_window,
             commands::get_config,
             commands::save_config,
         ])
@@ -55,7 +57,6 @@ pub fn run() {
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    // Create tray menu
     let translate = MenuItem::with_id(app, "translate", "翻译选中文本", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
@@ -63,33 +64,42 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(app, &[&translate, &settings, &separator, &quit])?;
 
-    // Build tray icon
-    // Use embedded icon or default Tauri icon
     let icon = Image::from_bytes(include_bytes!("../icons/icon.png"))
         .unwrap_or_else(|_| Image::new(&[0; 32], 32, 32));
+
+    let app_clone = app.clone();
 
     let _tray = TrayIconBuilder::new()
         .icon(icon)
         .menu(&menu)
         .tooltip("TransLens - AI 翻译")
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "translate" => {
-                // Trigger translation of current clipboard
-                let _ = app.emit("translate-clipboard", ());
+        .on_menu_event(move |app, event| {
+            let handle = app.clone();
+            match event.id().as_ref() {
+                "translate" => {
+                    // Call capture_and_translate in async context
+                    tauri::async_runtime::spawn(async move {
+                        let _ = commands::capture_and_translate(handle).await;
+                    });
+                }
+                "settings" => {
+                    tauri::async_runtime::spawn(async move {
+                        let _ = commands::open_settings_window(handle).await;
+                    });
+                }
+                "quit" => {
+                    app.exit(0);
+                }
+                _ => {}
             }
-            "settings" => {
-                let _ = app.emit("show-settings", ());
-            }
-            "quit" => {
-                app.exit(0);
-            }
-            _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
+        .on_tray_icon_event(move |tray, event| {
             use tauri::tray::TrayIconEvent;
             if let TrayIconEvent::DoubleClick { .. } = event {
-                let app = tray.app_handle();
-                let _ = app.emit("translate-clipboard", ());
+                let handle = tray.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = commands::capture_and_translate(handle).await;
+                });
             }
         })
         .build(app)?;

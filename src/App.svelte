@@ -9,13 +9,18 @@
   let isPinned = $state(false);
   let targetLang = $state("zh-CN");
 
-  // --- Drag state (Ctrl+Click, CSS transform based) ---
+  // --- Drag state (Ctrl+Click, Tauri setPosition per frame) ---
   let isDragging = $state(false);
-  let dragStartX = 0;
-  let dragStartY = 0;
-  let dragDeltaX = $state(0);
-  let dragDeltaY = $state(0);
+  let dragStartScreenX = 0;
+  let dragStartScreenY = 0;
+  let dragStartWinX = 0;
+  let dragStartWinY = 0;
+  let dragScale = 1;
   let ctrlHeld = $state(false);
+  // RAF throttling: store latest delta for the next frame
+  let rafPending = false;
+  let latestDx = 0;
+  let latestDy = 0;
 
   // --- Clipboard monitor (when pinned) ---
   let clipMonitorInterval: ReturnType<typeof setInterval> | null = null;
@@ -171,52 +176,56 @@
   }
 
   // --- Custom Ctrl+Click drag ---
-  // Strategy: use CSS `transform: translate()` during drag (instant, no async),
-  // then apply final position via Tauri `setPosition()` once on mouseup.
+  // Strategy: cache all state on mousedown, then call Tauri `setPosition()`
+  // on each mousemove via requestAnimationFrame (no CSS transform clipping).
 
-  /** Record drag start. Only activates when Ctrl is held. */
   async function handleMouseDown(e: MouseEvent) {
     if (!ctrlHeld) return;
     const target = e.target as HTMLElement;
     if (target.closest("button") || target.closest("input") || target.closest("textarea")) return;
 
     isDragging = true;
-    dragStartX = e.screenX;
-    dragStartY = e.screenY;
-    dragDeltaX = 0;
-    dragDeltaY = 0;
+    const w = await getWin();
+    const pos = await w.position();
+    dragStartScreenX = e.screenX;
+    dragStartScreenY = e.screenY;
+    dragStartWinX = pos.x;
+    dragStartWinY = pos.y;
+    dragScale = await w.scaleFactor() || 1;
+  }
+
+  async function doSetPosition(dxPhys: number, dyPhys: number) {
+    try {
+      const w = await getWin();
+      await w.setPosition({
+        x: Math.round(dragStartWinX + dxPhys / dragScale),
+        y: Math.round(dragStartWinY + dyPhys / dragScale),
+      });
+    } catch (err) {
+      console.error("setPosition:", err);
+    }
   }
 
   function handleMouseMove(e: MouseEvent) {
     if (!isDragging) return;
-    // Apply CSS transform instantly — sync, no async overhead
-    dragDeltaX = e.screenX - dragStartX;
-    dragDeltaY = e.screenY - dragStartY;
+    // Keep updating latest delta on every mousemove
+    latestDx = e.screenX - dragStartScreenX;
+    latestDy = e.screenY - dragStartScreenY;
+    // Schedule at most one RAF per frame — uses freshest delta
+    if (!rafPending) {
+      rafPending = true;
+      requestAnimationFrame(async () => {
+        rafPending = false;
+        await doSetPosition(latestDx, latestDy);
+      });
+    }
   }
 
-  /** On mouse up: commit the final position via Tauri API (one call only). */
-  async function handleMouseUp(e: MouseEvent) {
+  /** Mouse up / leave: finalize position. */
+  async function handleMouseUp(_e: MouseEvent) {
     if (!isDragging) return;
     isDragging = false;
-
-    const w = await getWin();
-    const pos = await w.position();
-    const scale = await w.scaleFactor() || 1;
-
-    // Physical delta → logical delta
-    const dx = Math.round((e.screenX - dragStartX) / scale);
-    const dy = Math.round((e.screenY - dragStartY) / scale);
-
-    // Reset CSS transform
-    dragDeltaX = 0;
-    dragDeltaY = 0;
-
-    // Commit final position (one async call)
-    try {
-      await w.setPosition({ x: pos.x + dx, y: pos.y + dy });
-    } catch (err) {
-      console.error("Drag commit failed:", err);
-    }
+    rafPending = false;
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -232,6 +241,7 @@
     if (e.key === "Control") {
       ctrlHeld = false;
       isDragging = false;
+      rafPending = false;
     }
   }
 
@@ -266,7 +276,7 @@
   onmouseleave={handleMouseUp}
 />
 
-<div class="window" class:dragging={isDragging} style="transform: translate({dragDeltaX}px, {dragDeltaY}px)">
+<div class="window" class:dragging={isDragging}>
   <!-- Title bar (drag is handled by Ctrl+Click, data-tauri-drag-region is not used) -->
   <div class="titlebar">
     <div class="titlebar-left">

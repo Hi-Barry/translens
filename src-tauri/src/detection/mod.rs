@@ -18,12 +18,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub fn start_detection(handle: AppHandle) {
+    // Start the legacy clipboard-based detection (Ctrl+C simulation) in its own thread
     let running = Arc::new(AtomicBool::new(true));
+    let h = handle.clone();
+    std::thread::spawn(move || {
+        platform::start_impl(h, running);
+    });
 
-    // Start the legacy clipboard-based detection (Ctrl+C simulation)
-    platform::start_impl(handle.clone(), running);
-
-    // Start the new UIA-based selection hook
+    // Start the new UIA-based selection hook (also spawns its own thread)
     #[cfg(target_os = "windows")]
     uia_hook::start_uia_hook(handle);
 }

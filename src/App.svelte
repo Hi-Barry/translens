@@ -37,10 +37,14 @@
     // Setup blur → auto-hide (unless pinned)
     await setupBlurHandler();
 
-    // Save position whenever window is moved (native drag, external, etc.)
+    // Save window position to localStorage on every move
     const w2 = await getWin();
-    w2.listen("tauri://move", () => {
-      savePosition();
+    w2.listen("tauri://move", async () => {
+      try {
+        const pos = await w2.position();
+        localStorage.setItem("translens_win_x", String(pos.x));
+        localStorage.setItem("translens_win_y", String(pos.y));
+      } catch { /* ignore */ }
     });
 
     // Receive text to translate
@@ -50,6 +54,22 @@
         lastClipText = event.payload;
         translatedText = "";
         isTranslating = true;
+
+        // Restore saved window position RIGHT HERE, overriding whatever the
+        // Rust backend set (center / explicit).  localStorage is sync and
+        // instant, no IPC round-trip needed.
+        const sx = localStorage.getItem("translens_win_x");
+        const sy = localStorage.getItem("translens_win_y");
+        if (sx && sy) {
+          (async () => {
+            try {
+              const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
+              const w = await getWin();
+              await w.setPosition(new PhysicalPosition(parseInt(sx), parseInt(sy)));
+            } catch { /* ignore */ }
+          })();
+        }
+
         translate();
       })
     );
@@ -109,19 +129,7 @@
 
   // --- Window controls ---
 
-  async function savePosition() {
-    try {
-      const w = await getWin();
-      const pos = await w.position();
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("save_window_position", { x: pos.x, y: pos.y });
-    } catch (err) {
-      console.error("savePosition:", err);
-    }
-  }
-
   async function hideWindow() {
-    await savePosition();
     const w = await getWin();
     await w.hide();
   }

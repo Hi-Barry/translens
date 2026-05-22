@@ -45,8 +45,11 @@ pub async fn translate_text(
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(content) => {
-                app.emit("translation-chunk", &content)
-                    .map_err(|e| format!("发送事件失败: {}", e))?;
+                // Skip empty chunks (SSE heartbeats, keepalive)
+                if !content.is_empty() {
+                    app.emit("translation-chunk", &content)
+                        .map_err(|e| format!("发送事件失败: {}", e))?;
+                }
             }
             Err(e) => {
                 return Err(format!("翻译流错误: {}", e));
@@ -108,9 +111,15 @@ async fn show_translator_window_inner(
     y: i32,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("translator") {
-        window
-            .set_position(tauri::PhysicalPosition::new(x, y))
-            .map_err(|e| e.to_string())?;
+        // Only set position if coordinates are meaningful (not 0,0 top-left)
+        if x != 0 || y != 0 {
+            window
+                .set_position(tauri::PhysicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
+        } else {
+            // Default: center on screen
+            let _ = window.center();
+        }
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         app.emit("translate-text", &text)

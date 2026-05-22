@@ -165,8 +165,11 @@ impl DeepSeekTranslator {
                         }
                     }
 
+                    // Skip empty chunks (SSE heartbeats, non-content lines)
                     if output.is_empty() {
-                        Err("Empty chunk".to_string())
+                        // Returning None is not possible with this stream type,
+                        // so return an empty string that downstream filters out.
+                        Ok(String::new())
                     } else {
                         Ok(output)
                     }

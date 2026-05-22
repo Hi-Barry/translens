@@ -42,7 +42,6 @@
     // Show settings window
     unlisteners.push(
       await listen<void>("show-settings", () => {
-        // Could navigate or open settings
         console.log("show settings");
       })
     );
@@ -67,11 +66,10 @@
     }
   }
 
-  async function closeWindow() {
-    if (!isPinned) {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      await getCurrentWindow().close();
-    }
+  /** Hide the window (minimize to tray). Close/destroy exits the app. */
+  async function hideWindow() {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().hide();
   }
 
   function togglePin() {
@@ -87,6 +85,15 @@
     }
   }
 
+  async function copySource() {
+    try {
+      await navigator.clipboard.writeText(sourceText);
+    } catch {
+      const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+      await writeText(sourceText);
+    }
+  }
+
   async function speakText(text: string) {
     if ("speechSynthesis" in window) {
       const utterance = new SpeechSynthesisUtterance(text);
@@ -98,7 +105,7 @@
   // Listen for keyboard events
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape" && !isPinned) {
-      closeWindow();
+      hideWindow();
     }
   }
 </script>
@@ -114,21 +121,21 @@
         onclick={togglePin}
         title={isPinned ? '取消固定' : '固定窗口'}
       >
-        📌
+        {isPinned ? '📌' : '📍'}
       </button>
     </div>
     <div class="titlebar-center" data-tauri-drag-region>
       TransLens
     </div>
     <div class="titlebar-right">
-      <button class="icon-btn" onclick={closeWindow} title="关闭 (ESC)">✕</button>
+      <button class="icon-btn" onclick={hideWindow} title="隐藏 (ESC)">✕</button>
     </div>
   </div>
 
   <!-- Source text -->
   <div class="section source-section">
-    <div class="section-label">原文</div>
-    <div class="text-content">{sourceText}</div>
+    <div class="section-label">原文 <button class="copy-btn" onclick={copySource}>📋 复制</button></div>
+    <div class="text-content selectable">{sourceText}</div>
   </div>
 
   <div class="divider"></div>
@@ -136,7 +143,7 @@
   <!-- Translation result -->
   <div class="section result-section">
     <div class="section-label">翻译 ({targetLang})</div>
-    <div class="text-content">
+    <div class="text-content selectable">
       {#if isTranslating && !translatedText}
         <span class="loading">翻译中...</span>
       {:else if translatedText}
@@ -155,13 +162,22 @@
     </button>
     <button
       class="tool-btn"
-      onclick={() => { targetLang = targetLang === 'zh-CN' ? 'en' : 'zh-CN'; translate(); }}
+      onclick={() => {
+        targetLang = targetLang === "zh-CN" ? "en" : "zh-CN";
+        if (sourceText) translate();
+      }}
       title="切换语言"
     >
       🔄
     </button>
+
+    <!-- Pin indicator -->
+    <span class="pin-indicator {isPinned ? 'pinned' : ''}">
+      {isPinned ? '已固定' : ''}
+    </span>
+
     <span class="flex-1"></span>
-    <span class="lang-badge">{targetLang === 'zh-CN' ? '中' : 'EN'}</span>
+    <span class="lang-badge">{targetLang === "zh-CN" ? "中" : "EN"}</span>
   </div>
 </div>
 
@@ -183,6 +199,7 @@
     background: var(--surface);
     gap: 4px;
     flex-shrink: 0;
+    /* Entire titlebar is a drag region; only buttons are click-through */
   }
 
   .titlebar-center {
@@ -215,7 +232,8 @@
     color: var(--text);
   }
   .icon-btn.active {
-    color: var(--accent);
+    color: #ffd700;
+    text-shadow: 0 0 6px rgba(255,215,0,0.5);
   }
 
   .section {
@@ -231,6 +249,23 @@
     margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .copy-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+  .copy-btn:hover {
+    opacity: 1;
   }
 
   .text-content {
@@ -238,6 +273,12 @@
     line-height: 1.6;
     word-break: break-word;
     white-space: pre-wrap;
+  }
+
+  /* Allow text selection only in content areas */
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   .divider {
@@ -291,5 +332,14 @@
     border-radius: 10px;
     background: var(--accent);
     color: white;
+  }
+
+  .pin-indicator {
+    font-size: 11px;
+    color: transparent;
+    transition: color 0.2s;
+  }
+  .pin-indicator.pinned {
+    color: #ffd700;
   }
 </style>

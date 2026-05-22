@@ -42,12 +42,12 @@ pub fn start_impl(_handle: AppHandle, running: Arc<AtomicBool>) {
 }
 
 /// Capture currently selected text: save clipboard → Ctrl+C → read → restore
-pub fn capture_selected_text(_app: &AppHandle) -> Option<String> {
+pub fn capture_selected_text(app: &AppHandle) -> Option<String> {
     unsafe {
         let saved = save_clipboard_ffi();
         simulate_ctrl_c();
         std::thread::sleep(std::time::Duration::from_millis(150));
-        let result = read_clipboard_text_ffi();
+        let result = read_clipboard_text(app);
         if let Some(ref prev) = saved {
             restore_clipboard_ffi(prev.as_ptr(), prev.len());
         }

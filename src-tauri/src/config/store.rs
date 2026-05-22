@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn default_window_pos() -> i32 { -1 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub target_language: String,
@@ -21,7 +23,9 @@ pub struct AppConfig {
     pub font_size: u32,
 
     // Saved window position (-1 = not yet saved, use center)
+    #[serde(default = "default_window_pos")]
     pub window_x: i32,
+    #[serde(default = "default_window_pos")]
     pub window_y: i32,
 }
 

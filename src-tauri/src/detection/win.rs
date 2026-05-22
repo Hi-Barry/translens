@@ -7,9 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
 
-use windows::Win32::Foundation::*;
 use windows::Win32::System::DataExchange::*;
+use windows::Win32::System::Memory::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+
+// CF_UNICODETEXT = 13 — not exposed in windows crate v0.60 DataExchange module
+const CF_UNICODETEXT: u32 = 13u32;
 
 /// Start the Windows detection background thread
 pub fn start_impl(_handle: AppHandle, running: Arc<AtomicBool>) {
@@ -51,32 +54,33 @@ pub fn capture_selected_text() -> Option<String> {
 /// Save clipboard data for later restoration
 struct SavedClipboard {
     data: Vec<u16>,
-    format: u32,
+    _format: u32,
 }
 
 fn save_clipboard() -> Option<SavedClipboard> {
     unsafe {
-        if OpenClipboard(None).as_bool() {
-            // Try CF_UNICODETEXT first
-            let handle = GetClipboardData(CF_UNICODETEXT);
-            if !handle.is_invalid() {
-                let ptr = GlobalLock(handle) as *const u16;
-                if !ptr.is_null() {
-                    let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
-                    let mut data = Vec::with_capacity(len + 1);
-                    for i in 0..=len {
-                        data.push(*ptr.add(i));
+        let opened = OpenClipboard(None).is_ok();
+        if opened {
+            if let Ok(handle) = GetClipboardData(CF_UNICODETEXT) {
+                if !handle.is_invalid() {
+                    let ptr = GlobalLock(handle) as *const u16;
+                    if !ptr.is_null() {
+                        let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
+                        let mut data = Vec::with_capacity(len + 1);
+                        for i in 0..=len {
+                            data.push(*ptr.add(i));
+                        }
+                        let _ = GlobalUnlock(handle);
+                        let _ = CloseClipboard();
+                        return Some(SavedClipboard {
+                            data,
+                            _format: CF_UNICODETEXT,
+                        });
                     }
-                    GlobalUnlock(handle);
-                    CloseClipboard();
-                    return Some(SavedClipboard {
-                        data,
-                        format: CF_UNICODETEXT.0 as u32,
-                    });
+                    let _ = GlobalUnlock(handle);
                 }
-                GlobalUnlock(handle);
             }
-            CloseClipboard();
+            let _ = CloseClipboard();
         }
     }
     None
@@ -85,20 +89,26 @@ fn save_clipboard() -> Option<SavedClipboard> {
 fn restore_clipboard(saved: &Option<SavedClipboard>) {
     if let Some(saved) = saved {
         unsafe {
-            if OpenClipboard(None).as_bool() {
-                EmptyClipboard();
+            if OpenClipboard(None).is_ok() {
+                let _ = EmptyClipboard();
                 if !saved.data.is_empty() {
                     let handle = GlobalAlloc(GMEM_MOVEABLE, saved.data.len() * 2);
-                    if !handle.is_invalid() {
-                        let ptr = GlobalLock(handle) as *mut u16;
-                        if !ptr.is_null() {
-                            std::ptr::copy_nonoverlapping(saved.data.as_ptr(), ptr, saved.data.len());
-                            GlobalUnlock(handle);
-                            SetClipboardData(CF_UNICODETEXT, handle);
+                    if let Ok(handle) = handle {
+                        if !handle.is_invalid() {
+                            let ptr = GlobalLock(handle) as *mut u16;
+                            if !ptr.is_null() {
+                                std::ptr::copy_nonoverlapping(
+                                    saved.data.as_ptr(),
+                                    ptr,
+                                    saved.data.len(),
+                                );
+                                let _ = GlobalUnlock(handle);
+                                let _ = SetClipboardData(CF_UNICODETEXT, handle);
+                            }
                         }
                     }
                 }
-                CloseClipboard();
+                let _ = CloseClipboard();
             }
         }
     }
@@ -106,21 +116,23 @@ fn restore_clipboard(saved: &Option<SavedClipboard>) {
 
 pub fn read_clipboard_text() -> Option<String> {
     unsafe {
-        if OpenClipboard(None).as_bool() {
-            let handle = GetClipboardData(CF_UNICODETEXT);
-            if !handle.is_invalid() {
-                let ptr = GlobalLock(handle) as *const u16;
-                if !ptr.is_null() {
-                    let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
-                    let slice = std::slice::from_raw_parts(ptr, len);
-                    let s = String::from_utf16_lossy(slice);
-                    GlobalUnlock(handle);
-                    CloseClipboard();
-                    return Some(s);
+        let opened = OpenClipboard(None).is_ok();
+        if opened {
+            if let Ok(handle) = GetClipboardData(CF_UNICODETEXT) {
+                if !handle.is_invalid() {
+                    let ptr = GlobalLock(handle) as *const u16;
+                    if !ptr.is_null() {
+                        let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
+                        let slice = std::slice::from_raw_parts(ptr, len);
+                        let s = String::from_utf16_lossy(slice);
+                        let _ = GlobalUnlock(handle);
+                        let _ = CloseClipboard();
+                        return Some(s);
+                    }
+                    let _ = GlobalUnlock(handle);
                 }
-                GlobalUnlock(handle);
             }
-            CloseClipboard();
+            let _ = CloseClipboard();
         }
     }
     None

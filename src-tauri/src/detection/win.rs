@@ -129,9 +129,9 @@ pub fn read_clipboard_text() -> Option<String> {
 fn simulate_ctrl_c() {
     unsafe {
         // Press Ctrl
-        keybd_event(VK_CONTROL.0 as u8, 0, 0, 0);
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
         // Press C
-        keybd_event(0x43, 0, 0, 0); // Virtual key for 'C'
+        keybd_event(0x43, 0, KEYBD_EVENT_FLAGS(0), 0); // Virtual key for 'C'
         std::thread::sleep(std::time::Duration::from_millis(20));
         // Release C
         keybd_event(0x43, 0, KEYEVENTF_KEYUP, 0);

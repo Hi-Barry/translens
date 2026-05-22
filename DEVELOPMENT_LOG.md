@@ -126,6 +126,137 @@ pub window_x: i32,
 pub window_y: i32,
 ```
 
+---
+
+## 2026-05-22（晚）
+
+### 功能：UIA 选中检测 + 浮动翻译按钮
+
+**目标：** 实现鼠标选中文本自动检测，在鼠标右上方显示浮动翻译图标，点击后弹出翻译窗口直接翻译，不经过剪贴板。
+
+#### 整体设计
+
+```
+鼠标选中文本
+    ↓  WinEvent Hook (EVENT_OBJECT_SELECTION)
+UIA 钩子线程 → SetWinEventHook + 消息泵
+    ↓  UIA TextPattern::GetSelection (原始 COM FFI)
+读取选中文本 + 光标位置
+    ↓  emit("selection-detected", {text, cx, cy, rect})
+lib.rs 监听器
+    ↓  overlay::show_button(cx+12, cy-20, text)
+创建/定位 36×36 透明浮动按钮窗口 (OverlayButton.svelte)
+    ↓  用户点击蓝色翻译图标
+invoke("overlay_click")
+    ↓  overlay::on_overlay_click()
+隐藏按钮 → 打开翻译窗口 → 自动翻译
+```
+
+#### 新增文件
+
+| 文件 | 行数 | 说明 |
+|------|------|------|
+| `src-tauri/src/detection/uia_hook.rs` | ~470 | UIA 选中检测核心。原始 COM FFI（不依赖 windows crate），SetWinEventHook + 消息泵 |
+| `src/lib/OverlayButton.svelte` | ~100 | 36×36 蓝色翻译图标，带缩放淡入动画 |
+| `src/overlay-main.ts` | 10 | 浮动按钮窗口入口 |
+| `overlay.html` | 16 | 浮动按钮 HTML 模板 |
+
+#### 关键技术决策
+
+**1. 为什么不直接用 windows crate 的 UIA 绑定？**
+
+现有 `win.rs` 使用的是原始 FFI（`#[link(name = "user32")]`），原因是项目在 Linux 上交叉编译，`windows` crate 的 `#![cfg(windows)]` 属性使其在 Linux host 上完全为空。为了保持一致和可靠，UIA 也用了原始 COM FFI。
+
+但实践中，UIA COM 接口的 vtbl 定义极其冗长（每个接口几十个方法）。尝试了两种路径：
+
+| 方案 | 结果 | 原因 |
+|------|------|------|
+| windows crate `UI_Accessibility` feature | ❌ 开发机 Linux 无法编译 | 跨平台开发环境限制 |
+| **原始 COM FFI + vtable 索引** | ✅ | 遵循现有代码模式，只声明需要用到的 vtable entry 索引号即可 |
+
+**2. UIA TextPattern vs EM_GETSELTEXT**
+
+UIA TextPattern 跨应用覆盖最广（浏览器、VS Code、记事本等），但需要处理 SAFEARRAY。`EM_GETSELTEXT` 只支持标准 Edit/RichEdit 控件。选了 UIA。
+
+**3. SAFEARRAY 处理**
+
+`IUIAutomationTextPattern::GetSelection` 返回 SAFEARRAY of `IUIAutomationTextRange*`。直接 `SafeArrayAccessData` + 指针数组读取，配套 `SafeArrayGetDim` / `SafeArrayGetUBound` / `SafeArrayDestroy`，全部原始 oleaut32 FFI。
+
+**4. 浮动按钮实现方式**
+
+| 方案 | 结果 | 原因 |
+|------|------|------|
+| 原始 WS_EX_LAYERED 窗口 | 未采用 | 需要额外处理绘制/点击命中 |
+| **Tauri WebviewWindow** | ✅ | 复用 Vite 构建流程，Svelte 组件开箱即用 |
+
+透明的 36×36 Tauri 窗口，`skip_taskbar: true`, `alwaysOnTop: true`。Svelte 组件实现缩放淡入动画，点击后通过 IPC 通知 Rust 后端。
+
+#### 踩坑记录
+
+**Bug 1：UIA 钩子线程从未启动**
+
+**现象：** 选中文本无任何反应，调试日志无 UIA 相关输出
+**根因：** `detection::start_detection` 里调用顺序为：
+```rust
+pub fn start_detection(handle: AppHandle) {
+    platform::start_impl(handle.clone(), running);   // ← 死循环，从不返回
+    uia_hook::start_uia_hook(handle);                // ← 永远执行不到
+}
+```
+`platform::start_impl` 内部有一个 `while(running) { sleep(500ms) }` 永真循环。
+**修复：** 将 `start_impl` 放入 `thread::spawn`。
+
+**Bug 2（潜在）：COM 初始化顺序**
+
+`CoInitializeEx` 必须在 `SetWinEventHook` 之前调用。当前 `start_uia_hook` 内先 `CoInitializeEx` 再注册 hook，顺序正确。
+
+**Bug 3（潜在）：消息泵阻塞**
+
+`GetMessageW` 是阻塞调用，没有消息时会挂起线程。这是 WinEventHook 的标准模式——Windows 在消息泵活跃时才能分发事件回调。使用 `WINEVENT_OUTOFCONTEXT` 标志，回调会由 `GetMessageW` 在内部调用。
+
+#### 配置变更
+
+`config/store.rs` 新增字段：
+```rust
+pub text_selection_detection: bool,  // 默认 true
+```
+
+`tauri.conf.json` 新增窗口：
+```json
+{
+  "label": "overlay-button",
+  "url": "overlay.html",
+  "width": 36, "height": 36,
+  "decorations": false, "transparent": true,
+  "alwaysOnTop": true, "visible": false,
+  "skip_taskbar": true
+}
+```
+
+vite.config.ts 新增构建入口：
+```ts
+rollupOptions.input.overlay = resolve(__dirname, "overlay.html")
+```
+
+### 调试技巧（Windows 专用）
+
+```rust
+// 在 uia_hook.rs 中加日志
+fn process_selection() {
+    log::info!("selection-detected event received");
+    match unsafe { query_uia_selection() } {
+        Some(sel) => log::info!("selected text: {}...", &sel.text[..sel.text.len().min(50)]),
+        None => log::info!("no selection or UIA unavailable"),
+    }
+}
+```
+
+```bash
+# Windows 上查看日志（需要 env_logger）
+$env:RUST_LOG="info"
+translens.exe 2> debug.log
+```
+
 ### 常用命令
 
 ```bash

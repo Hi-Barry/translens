@@ -129,7 +129,17 @@
 
   // --- Window controls ---
 
+  async function savePosition() {
+    try {
+      const w = await getWin();
+      const pos = await w.position();
+      localStorage.setItem("translens_win_x", String(pos.x));
+      localStorage.setItem("translens_win_y", String(pos.y));
+    } catch { /* ignore */ }
+  }
+
   async function hideWindow() {
+    await savePosition();
     const w = await getWin();
     await w.hide();
   }
@@ -220,6 +230,8 @@
     try {
       const w = await getWin();
       await w.startDragging();
+      // startDragging resolves when native drag ends — save final position
+      await savePosition();
     } catch (err) {
       console.error("startDragging:", err);
     }

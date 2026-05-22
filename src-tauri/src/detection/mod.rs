@@ -1,5 +1,5 @@
 //! Text selection detection
-//! On Windows: clipboard-based capture + mouse hooks
+//! On Windows: clipboard-based capture + UIA selection hook
 //! On other platforms: NOP stub
 
 #[cfg(target_os = "windows")]
@@ -10,13 +10,22 @@ mod platform;
 #[path = "stub.rs"]
 mod platform;
 
+#[cfg(target_os = "windows")]
+mod uia_hook;
+
 use tauri::AppHandle;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub fn start_detection(handle: AppHandle) {
     let running = Arc::new(AtomicBool::new(true));
-    platform::start_impl(handle, running);
+
+    // Start the legacy clipboard-based detection (Ctrl+C simulation)
+    platform::start_impl(handle.clone(), running);
+
+    // Start the new UIA-based selection hook
+    #[cfg(target_os = "windows")]
+    uia_hook::start_uia_hook(handle);
 }
 
 /// Capture currently selected text (Windows clipboard-based)

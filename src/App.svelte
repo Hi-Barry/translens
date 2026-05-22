@@ -47,7 +47,7 @@
       } catch { /* ignore */ }
     });
 
-    // Receive text to translate
+    // Receive text to translate (from tray or overlay click)
     unlisteners.push(
       await listen<string>("translate-text", (event) => {
         sourceText = event.payload;
@@ -55,9 +55,7 @@
         translatedText = "";
         isTranslating = true;
 
-        // Restore saved window position RIGHT HERE, overriding whatever the
-        // Rust backend set (center / explicit).  localStorage is sync and
-        // instant, no IPC round-trip needed.
+        // Restore saved window position from localStorage
         const sx = localStorage.getItem("translens_win_x");
         const sy = localStorage.getItem("translens_win_y");
         if (sx && sy) {
@@ -71,6 +69,32 @@
         }
 
         translate();
+      })
+    );
+
+    // Listen for selection-detected events (when translator is pinned)
+    unlisteners.push(
+      await listen("selection-detected", (event) => {
+        // If the translator window is pinned and visible, auto-translate
+        // new selections without needing to click the overlay button
+        if (isPinned) {
+          const payload = event.payload as any;
+          if (payload?.text && typeof payload.text === "string") {
+            const text = payload.text as string;
+            if (text !== sourceText) {
+              sourceText = text;
+              translatedText = "";
+              isTranslating = true;
+              translate();
+            }
+          }
+        }
+      })
+    );
+
+    unlisteners.push(
+      await listen("selection-cleared", () => {
+        // Optionally clear or hide when selection is gone
       })
     );
 

@@ -10,6 +10,7 @@
   let temperature = $state(0.1);
   let targetLang = $state("zh-CN");
   let showOverlay = $state(true);
+  let textSelectionDetection = $state(true);
   let closeOnEsc = $state(true);
   let theme = $state("system");
   let font_size = $state(14);
@@ -28,6 +29,7 @@
       temperature = config.deepseek_temperature ?? 0.1;
       targetLang = config.target_language || "zh-CN";
       showOverlay = config.show_overlay_button ?? true;
+      textSelectionDetection = config.text_selection_detection ?? true;
       closeOnEsc = config.close_on_esc ?? true;
       theme = config.theme || "system";
       font_size = config.font_size || 14;
@@ -47,6 +49,7 @@
           target_language: targetLang,
           auto_detect_source: true,
           show_overlay_button: showOverlay,
+          text_selection_detection: textSelectionDetection,
           overlay_timeout_ms: 5000,
           close_on_esc: closeOnEsc,
           close_on_lose_focus: false,
@@ -174,8 +177,13 @@
     <h2>行为</h2>
 
     <label class="field checkbox">
+      <input type="checkbox" bind:checked={textSelectionDetection} />
+      <span>启用文本选中检测（自动检测选中的文本）</span>
+    </label>
+
+    <label class="field checkbox">
       <input type="checkbox" bind:checked={showOverlay} />
-      <span>选中文本后显示浮动按钮</span>
+      <span>选中文本后显示浮动翻译按钮</span>
     </label>
 
     <label class="field checkbox">

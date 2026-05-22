@@ -40,6 +40,23 @@
         "visible": false,
         "resizable": false,
         "shadow": false
+      },
+      {
+        "label": "overlay-button",
+        "title": "",
+        "url": "overlay.html",
+        "width": 36,
+        "height": 36,
+        "minWidth": 36,
+        "minHeight": 36,
+        "maxWidth": 36,
+        "maxHeight": 36,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "shadow": false
       }
     ],
     "security": {

@@ -104,7 +104,9 @@ pub async fn show_translator_window(
     show_translator_window_inner(app, text, x, y).await
 }
 
-async fn show_translator_window_inner(
+/// Show the translator window with the given text at given screen position.
+/// Public so overlay::win can call it directly.
+pub async fn show_translator_window_inner(
     app: AppHandle,
     text: String,
     x: i32,
@@ -201,5 +203,26 @@ pub fn save_config(
     config.save();
     let mut current = state.config.lock().map_err(|e| e.to_string())?;
     *current = config;
+    Ok(())
+}
+
+/// Show the overlay translate button at given position
+#[tauri::command]
+pub fn show_overlay_button(app: AppHandle, x: i32, y: i32, text: String) -> Result<(), String> {
+    crate::overlay::show_button(app, x, y, text);
+    Ok(())
+}
+
+/// Hide the overlay translate button
+#[tauri::command]
+pub fn hide_overlay_button(app: AppHandle) -> Result<(), String> {
+    crate::overlay::hide_button(&app);
+    Ok(())
+}
+
+/// Handle overlay button click — open translator with stored text
+#[tauri::command]
+pub fn overlay_click(app: AppHandle) -> Result<(), String> {
+    crate::overlay::on_overlay_click(&app);
     Ok(())
 }

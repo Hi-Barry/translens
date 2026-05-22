@@ -7,7 +7,7 @@ mod translator;
 use std::sync::Mutex;
 use config::AppConfig;
 use tauri::{
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Listener, Manager,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     image::Image,
@@ -41,6 +41,29 @@ pub fn run() {
                 });
             }
 
+            // Listen for selection events from UIA hook → show/hide overlay button
+            let handle = app.handle().clone();
+            app.listen("selection-detected", move |event| {
+                use crate::overlay::show_button;
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    if let (Some(text), Some(cx), Some(cy)) = (
+                        data["text"].as_str(),
+                        data["cx"].as_i64(),
+                        data["cy"].as_i64(),
+                    ) {
+                        // Button appears to the right and slightly above cursor
+                        let btn_x = cx as i32 + 12;
+                        let btn_y = cy as i32 - 20;
+                        show_button(handle.clone(), btn_x, btn_y, text.to_string());
+                    }
+                }
+            });
+
+            let handle = app.handle().clone();
+            app.listen("selection-cleared", move |_event| {
+                crate::overlay::hide_button(&handle);
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -52,6 +75,9 @@ pub fn run() {
             commands::get_config,
             commands::save_config,
             commands::save_window_position,
+            commands::show_overlay_button,
+            commands::hide_overlay_button,
+            commands::overlay_click,
         ])
         .run(tauri::generate_context!())
         .expect("error while running translens");
@@ -68,8 +94,6 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon = Image::from_bytes(include_bytes!("../icons/icon.png"))
         .unwrap_or_else(|_| Image::new(&[0; 32], 32, 32));
 
-    let app_clone = app.clone();
-
     let _tray = TrayIconBuilder::new()
         .icon(icon)
         .menu(&menu)
@@ -78,7 +102,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             let handle = app.clone();
             match event.id().as_ref() {
                 "translate" => {
-                    // Call capture_and_translate in async context
+                    // Direct translate (uses clipboard fallback)
                     tauri::async_runtime::spawn(async move {
                         let _ = commands::capture_and_translate(handle).await;
                     });

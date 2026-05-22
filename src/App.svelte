@@ -162,14 +162,29 @@
   }
 
   // --- Auto-hide on blur (unless pinned) ---
-  // Set up in onMount after window handle is cached
+  // Uses a 200ms debounce: resizing the window briefly blurs it;
+  // we hide only if the window stays unfocused after the delay.
   let blurSetupDone = false;
+  let blurTimer: ReturnType<typeof setTimeout> | null = null;
   async function setupBlurHandler() {
     if (blurSetupDone) return;
     const w = await getWin();
     await w.listen("tauri://blur", () => {
-      if (!isPinned) {
-        hideWindow();
+      if (isPinned) return;
+      if (blurTimer) clearTimeout(blurTimer);
+      blurTimer = setTimeout(async () => {
+        const focused = await w.isFocused();
+        if (!focused && !isPinned) {
+          await hideWindow();
+        }
+        blurTimer = null;
+      }, 200);
+    });
+    // If window regains focus within the delay, cancel hide
+    await w.listen("tauri://focus", () => {
+      if (blurTimer) {
+        clearTimeout(blurTimer);
+        blurTimer = null;
       }
     });
     blurSetupDone = true;
@@ -196,11 +211,15 @@
 
   async function doSetPosition(dxPhys: number, dyPhys: number) {
     try {
+      const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
       const w = await getWin();
-      await w.setPosition({
-        x: Math.round(dragStartWinX + dxPhys / dragScale),
-        y: Math.round(dragStartWinY + dyPhys / dragScale),
-      });
+      // Must use PhysicalPosition class instance — plain object {x,y} breaks IPC serialization.
+      await w.setPosition(
+        new PhysicalPosition(
+          Math.round(dragStartWinX + dxPhys / dragScale),
+          Math.round(dragStartWinY + dyPhys / dragScale),
+        ),
+      );
     } catch (err) {
       console.error("setPosition:", err);
     }

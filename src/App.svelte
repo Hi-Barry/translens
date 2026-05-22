@@ -9,18 +9,9 @@
   let isPinned = $state(false);
   let targetLang = $state("zh-CN");
 
-  // --- Drag state (Ctrl+Click, Tauri setPosition per frame) ---
+  // --- Drag state (Ctrl+Click, uses Tauri's native startDragging) ---
   let isDragging = $state(false);
-  let dragStartScreenX = 0;
-  let dragStartScreenY = 0;
-  let dragStartWinX = 0;
-  let dragStartWinY = 0;
-  let dragScale = 1;
   let ctrlHeld = $state(false);
-  // RAF throttling: store latest delta for the next frame
-  let rafPending = false;
-  let latestDx = 0;
-  let latestDy = 0;
 
   // --- Clipboard monitor (when pinned) ---
   let clipMonitorInterval: ReturnType<typeof setInterval> | null = null;
@@ -190,68 +181,26 @@
     blurSetupDone = true;
   }
 
-  // --- Custom Ctrl+Click drag ---
-  // Strategy: cache all state on mousedown, then call Tauri `setPosition()`
-  // on each mousemove via requestAnimationFrame (no CSS transform clipping).
+  // --- Custom Ctrl+Click drag via Tauri native API ---
+  // Uses window.startDragging() which handles the entire drag natively
+  // (no manual setPosition, RAF, or coordinate math needed).
 
   async function handleMouseDown(e: MouseEvent) {
     if (!ctrlHeld) return;
     const target = e.target as HTMLElement;
     if (target.closest("button") || target.closest("input") || target.closest("textarea")) return;
 
-    // Record ALL state first — only then allow mousemove to process.
-    // This prevents a race: mousemove fires during the await below
-    // when isDragging is true but dragStartScreenX/Y haven't been set yet.
-    const w = await getWin();
-    const pos = await w.position();
-    dragStartScreenX = e.screenX;
-    dragStartScreenY = e.screenY;
-    dragStartWinX = pos.x;
-    dragStartWinY = pos.y;
-    dragScale = await w.scaleFactor() || 1;
     isDragging = true;
-  }
-
-  // w.position() returns PhysicalPosition (physical pixels).
-  // e.screenX/Y are also physical pixels.
-  // So dxPhys/dyPhys are physical pixel deltas.
-  // PhysicalPosition takes physical pixels — no scale division needed.
-  async function doSetPosition(dxPhys: number, dyPhys: number) {
     try {
-      const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
       const w = await getWin();
-      await w.setPosition(
-        new PhysicalPosition(
-          Math.round(dragStartWinX + dxPhys),
-          Math.round(dragStartWinY + dyPhys),
-        ),
-      );
+      await w.startDragging();
     } catch (err) {
-      console.error("setPosition:", err);
+      console.error("startDragging:", err);
     }
-  }
-
-  function handleMouseMove(e: MouseEvent) {
-    if (!isDragging) return;
-    // Keep updating latest delta on every mousemove
-    latestDx = e.screenX - dragStartScreenX;
-    latestDy = e.screenY - dragStartScreenY;
-    // Schedule at most one RAF per frame — uses freshest delta
-    if (!rafPending) {
-      rafPending = true;
-      requestAnimationFrame(async () => {
-        rafPending = false;
-        await doSetPosition(latestDx, latestDy);
-      });
-    }
-  }
-
-  /** Mouse up / leave: finalize position. */
-  async function handleMouseUp(_e: MouseEvent) {
-    if (!isDragging) return;
     isDragging = false;
-    rafPending = false;
   }
+
+  // startDragging is modal — mousemove/up aren't needed
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape" && !isPinned) {
@@ -265,8 +214,6 @@
   function handleKeyUp(e: KeyboardEvent) {
     if (e.key === "Control") {
       ctrlHeld = false;
-      isDragging = false;
-      rafPending = false;
     }
   }
 
@@ -296,12 +243,9 @@
   onkeydown={handleKeyDown}
   onkeyup={handleKeyUp}
   onmousedown={handleMouseDown}
-  onmousemove={handleMouseMove}
-  onmouseup={handleMouseUp}
-  onmouseleave={handleMouseUp}
 />
 
-<div class="window" class:dragging={isDragging}>
+<div class="window">
   <!-- Title bar (drag is handled by Ctrl+Click, data-tauri-drag-region is not used) -->
   <div class="titlebar">
     <div class="titlebar-left">
@@ -379,9 +323,6 @@
     border-radius: 10px;
     overflow: hidden;
     cursor: default;
-  }
-  .window.dragging {
-    cursor: grabbing;
   }
 
   .titlebar {

@@ -11,8 +11,8 @@
 
   // --- Drag state (Ctrl+Click) ---
   let isDragging = $state(false);
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
+  let dragStartScreen = { x: 0, y: 0 };
+  let dragStartWin = { x: 0, y: 0 };
   let ctrlHeld = $state(false);
 
   // --- Clipboard monitor (when pinned) ---
@@ -180,20 +180,26 @@
     isDragging = true;
     const w = await getWin();
     const pos = await w.position();
-    const scale = await w.scaleFactor() || 1;
-    // How far from the window's top-left the click was (screen coordinates)
-    dragOffsetX = e.screenX - pos.x * scale;
-    dragOffsetY = e.screenY - pos.y * scale;
+    // Record: cursor screen position + window logical position at drag start
+    dragStartScreen = { x: e.screenX, y: e.screenY };
+    dragStartWin = { x: pos.x, y: pos.y };
   }
 
   async function handleMouseMove(e: MouseEvent) {
     if (!isDragging) return;
     const w = await getWin();
     const scale = await w.scaleFactor() || 1;
-    await w.setPosition({
-      x: Math.round(e.screenX - dragOffsetX),
-      y: Math.round(e.screenY - dragOffsetY),
-    });
+    // Physical pixel delta → divide by DPI scale → logical pixel delta
+    const deltaX = (e.screenX - dragStartScreen.x) / scale;
+    const deltaY = (e.screenY - dragStartScreen.y) / scale;
+    try {
+      await w.setPosition({
+        x: Math.round(dragStartWin.x + deltaX),
+        y: Math.round(dragStartWin.y + deltaY),
+      });
+    } catch (err) {
+      console.error("drag setPosition failed:", err);
+    }
   }
 
   function handleMouseUp() {

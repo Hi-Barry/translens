@@ -15,3 +15,8 @@ pub fn start_impl(_handle: AppHandle, running: Arc<AtomicBool>) {
         std::thread::sleep(std::time::Duration::from_secs(10));
     }
 }
+
+/// Stub - always returns None on non-Windows
+pub fn capture_selected_text(_handle: &AppHandle) -> Option<String> {
+    None
+}

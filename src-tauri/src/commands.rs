@@ -64,7 +64,7 @@ pub async fn translate_text(
 #[tauri::command]
 pub async fn capture_and_translate(app: AppHandle) -> Result<(), String> {
     // Try to capture selected text (Windows only, returns None on Linux)
-    let text = crate::detection::capture_selected_text();
+    let text = crate::detection::capture_selected_text(&app);
 
     let text = match text {
         Some(t) if !t.trim().is_empty() => t,
@@ -72,7 +72,7 @@ pub async fn capture_and_translate(app: AppHandle) -> Result<(), String> {
             // If no text captured via Ctrl+C, try direct clipboard read
             #[cfg(target_os = "windows")]
             {
-                let clip_text = crate::detection::win::read_clipboard_text().unwrap_or_default();
+                let clip_text = crate::detection::read_clipboard_text(&app).unwrap_or_default();
                 if !clip_text.trim().is_empty() {
                     clip_text
                 } else {

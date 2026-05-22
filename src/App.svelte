@@ -9,10 +9,12 @@
   let isPinned = $state(false);
   let targetLang = $state("zh-CN");
 
-  // --- Drag state (Ctrl+Click) ---
+  // --- Drag state (Ctrl+Click, CSS transform based) ---
   let isDragging = $state(false);
-  let dragStartScreen = { x: 0, y: 0 };
-  let dragStartWin = { x: 0, y: 0 };
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let dragDeltaX = $state(0);
+  let dragDeltaY = $state(0);
   let ctrlHeld = $state(false);
 
   // --- Clipboard monitor (when pinned) ---
@@ -169,41 +171,52 @@
   }
 
   // --- Custom Ctrl+Click drag ---
+  // Strategy: use CSS `transform: translate()` during drag (instant, no async),
+  // then apply final position via Tauri `setPosition()` once on mouseup.
 
   /** Record drag start. Only activates when Ctrl is held. */
   async function handleMouseDown(e: MouseEvent) {
     if (!ctrlHeld) return;
-    // Ignore clicks on buttons/inputs
     const target = e.target as HTMLElement;
     if (target.closest("button") || target.closest("input") || target.closest("textarea")) return;
 
     isDragging = true;
+    dragStartX = e.screenX;
+    dragStartY = e.screenY;
+    dragDeltaX = 0;
+    dragDeltaY = 0;
+  }
+
+  function handleMouseMove(e: MouseEvent) {
+    if (!isDragging) return;
+    // Apply CSS transform instantly — sync, no async overhead
+    dragDeltaX = e.screenX - dragStartX;
+    dragDeltaY = e.screenY - dragStartY;
+  }
+
+  /** On mouse up: commit the final position via Tauri API (one call only). */
+  async function handleMouseUp(e: MouseEvent) {
+    if (!isDragging) return;
+    isDragging = false;
+
     const w = await getWin();
     const pos = await w.position();
-    // Record: cursor screen position + window logical position at drag start
-    dragStartScreen = { x: e.screenX, y: e.screenY };
-    dragStartWin = { x: pos.x, y: pos.y };
-  }
-
-  async function handleMouseMove(e: MouseEvent) {
-    if (!isDragging) return;
-    const w = await getWin();
     const scale = await w.scaleFactor() || 1;
-    // Physical pixel delta → divide by DPI scale → logical pixel delta
-    const deltaX = (e.screenX - dragStartScreen.x) / scale;
-    const deltaY = (e.screenY - dragStartScreen.y) / scale;
-    try {
-      await w.setPosition({
-        x: Math.round(dragStartWin.x + deltaX),
-        y: Math.round(dragStartWin.y + deltaY),
-      });
-    } catch (err) {
-      console.error("drag setPosition failed:", err);
-    }
-  }
 
-  function handleMouseUp() {
-    isDragging = false;
+    // Physical delta → logical delta
+    const dx = Math.round((e.screenX - dragStartX) / scale);
+    const dy = Math.round((e.screenY - dragStartY) / scale);
+
+    // Reset CSS transform
+    dragDeltaX = 0;
+    dragDeltaY = 0;
+
+    // Commit final position (one async call)
+    try {
+      await w.setPosition({ x: pos.x + dx, y: pos.y + dy });
+    } catch (err) {
+      console.error("Drag commit failed:", err);
+    }
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -250,9 +263,10 @@
   onmousedown={handleMouseDown}
   onmousemove={handleMouseMove}
   onmouseup={handleMouseUp}
+  onmouseleave={handleMouseUp}
 />
 
-<div class="window" class:dragging={isDragging}>
+<div class="window" class:dragging={isDragging} style="transform: translate({dragDeltaX}px, {dragDeltaY}px)">
   <!-- Title bar (drag is handled by Ctrl+Click, data-tauri-drag-region is not used) -->
   <div class="titlebar">
     <div class="titlebar-left">

@@ -37,6 +37,12 @@
     // Setup blur → auto-hide (unless pinned)
     await setupBlurHandler();
 
+    // Save position whenever window is moved (native drag, external, etc.)
+    const w2 = await getWin();
+    w2.listen("tauri://move", () => {
+      savePosition();
+    });
+
     // Receive text to translate
     unlisteners.push(
       await listen<string>("translate-text", (event) => {
@@ -103,7 +109,19 @@
 
   // --- Window controls ---
 
+  async function savePosition() {
+    try {
+      const w = await getWin();
+      const pos = await w.position();
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("save_window_position", { x: pos.x, y: pos.y });
+    } catch (err) {
+      console.error("savePosition:", err);
+    }
+  }
+
   async function hideWindow() {
+    await savePosition();
     const w = await getWin();
     await w.hide();
   }

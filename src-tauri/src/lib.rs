@@ -51,6 +51,7 @@ pub fn run() {
             commands::open_settings_window,
             commands::get_config,
             commands::save_config,
+            commands::save_window_position,
         ])
         .run(tauri::generate_context!())
         .expect("error while running translens");

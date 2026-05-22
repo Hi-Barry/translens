@@ -111,14 +111,24 @@ async fn show_translator_window_inner(
     y: i32,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("translator") {
-        // Only set position if coordinates are meaningful (not 0,0 top-left)
+        // Determine position priority: explicit > saved > center
         if x != 0 || y != 0 {
             window
                 .set_position(tauri::PhysicalPosition::new(x, y))
                 .map_err(|e| e.to_string())?;
         } else {
-            // Default: center on screen
-            let _ = window.center();
+            // Check if we have a saved position from a previous session
+            let saved_pos = app.state::<AppState>().config.lock().ok().map(|c| (c.window_x, c.window_y));
+            match saved_pos {
+                Some((sx, sy)) if sx >= 0 && sy >= 0 => {
+                    window
+                        .set_position(tauri::PhysicalPosition::new(sx, sy))
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => {
+                    let _ = window.center();
+                }
+            }
         }
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
@@ -166,6 +176,20 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
     state.config.lock().map(|c| c.clone()).map_err(|e| e.to_string())
+}
+
+/// Save window position (called from frontend after drag)
+#[tauri::command]
+pub fn save_window_position(
+    state: State<'_, AppState>,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    config.window_x = x;
+    config.window_y = y;
+    config.save();
+    Ok(())
 }
 
 /// Save config

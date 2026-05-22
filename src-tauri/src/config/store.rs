@@ -19,6 +19,10 @@ pub struct AppConfig {
     pub theme: String,
     pub window_opacity: f64,
     pub font_size: u32,
+
+    // Saved window position (-1 = not yet saved, use center)
+    pub window_x: i32,
+    pub window_y: i32,
 }
 
 impl Default for AppConfig {
@@ -40,6 +44,9 @@ impl Default for AppConfig {
             theme: "system".to_string(),
             window_opacity: 0.95,
             font_size: 14,
+
+            window_x: -1,
+            window_y: -1,
         }
     }
 }

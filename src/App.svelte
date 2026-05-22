@@ -199,7 +199,9 @@
     const target = e.target as HTMLElement;
     if (target.closest("button") || target.closest("input") || target.closest("textarea")) return;
 
-    isDragging = true;
+    // Record ALL state first — only then allow mousemove to process.
+    // This prevents a race: mousemove fires during the await below
+    // when isDragging is true but dragStartScreenX/Y haven't been set yet.
     const w = await getWin();
     const pos = await w.position();
     dragStartScreenX = e.screenX;
@@ -207,17 +209,21 @@
     dragStartWinX = pos.x;
     dragStartWinY = pos.y;
     dragScale = await w.scaleFactor() || 1;
+    isDragging = true;
   }
 
+  // w.position() returns PhysicalPosition (physical pixels).
+  // e.screenX/Y are also physical pixels.
+  // So dxPhys/dyPhys are physical pixel deltas.
+  // PhysicalPosition takes physical pixels — no scale division needed.
   async function doSetPosition(dxPhys: number, dyPhys: number) {
     try {
       const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
       const w = await getWin();
-      // Must use PhysicalPosition class instance — plain object {x,y} breaks IPC serialization.
       await w.setPosition(
         new PhysicalPosition(
-          Math.round(dragStartWinX + dxPhys / dragScale),
-          Math.round(dragStartWinY + dyPhys / dragScale),
+          Math.round(dragStartWinX + dxPhys),
+          Math.round(dragStartWinY + dyPhys),
         ),
       );
     } catch (err) {

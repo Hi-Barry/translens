@@ -10,7 +10,7 @@
   let temperature = $state(0.1);
   let targetLang = $state("zh-CN");
   let closeOnEsc = $state(true);
-  let theme = $state("system");
+  let theme = $state("light");
   let font_size = $state(14);
   let windowOpacity = $state(0.95);
 
@@ -27,7 +27,7 @@
       temperature = config.deepseek_temperature ?? 0.1;
       targetLang = config.target_language || "zh-CN";
       closeOnEsc = config.close_on_esc ?? true;
-      theme = config.theme || "system";
+      theme = config.theme || "light";
       font_size = config.font_size || 14;
       windowOpacity = config.window_opacity ?? 0.95;
     } catch (e) {
@@ -142,9 +142,8 @@
     <label class="field">
       <span>主题</span>
       <select bind:value={theme}>
-        <option value="system">跟随系统</option>
+        <option value="light">浅色（默认）</option>
         <option value="dark">深色</option>
-        <option value="light">浅色</option>
       </select>
     </label>
 

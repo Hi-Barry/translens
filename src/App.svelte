@@ -9,10 +9,62 @@
   let isPinned = $state(false);
   let showOriginal = $state(false);
   let targetLang = $state("zh-CN");
+  let isDark = $state(false);
 
   // --- Clipboard monitor (when visible) ---
   let clipMonitorInterval: ReturnType<typeof setInterval> | null = null;
   let lastClipText = $state("");
+
+  // --- Translation cache ---
+  const CACHE_KEY = "translens_cache";
+  const MAX_CACHE = 10;
+
+  interface CacheEntry {
+    key: string;
+    translated: string;
+    ts: number;
+  }
+
+  function cacheKey(text: string, lang: string): string {
+    return text + "|" + lang;
+  }
+
+  function getCache(text: string, lang: string): string | null {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const entries: CacheEntry[] = JSON.parse(raw);
+      const key = cacheKey(text, lang);
+      const idx = entries.findIndex((e) => e.key === key);
+      if (idx === -1) return null;
+      // Move to front (LRU)
+      const [entry] = entries.splice(idx, 1);
+      entries.unshift(entry);
+      localStorage.setItem(CACHE_KEY, JSON.stringify(entries));
+      return entry.translated;
+    } catch {
+      return null;
+    }
+  }
+
+  function setCache(text: string, translated: string, lang: string) {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      let entries: CacheEntry[] = raw ? JSON.parse(raw) : [];
+      const key = cacheKey(text, lang);
+      // Remove existing entry for this key
+      entries = entries.filter((e) => e.key !== key);
+      // Add to front
+      entries.unshift({ key, translated, ts: Date.now() });
+      // Trim to max
+      if (entries.length > MAX_CACHE) {
+        entries = entries.slice(0, MAX_CACHE);
+      }
+      localStorage.setItem(CACHE_KEY, JSON.stringify(entries));
+    } catch {
+      // Silently fail — cache is non-critical
+    }
+  }
 
   // --- Tauri event listeners ---
   let unlisteners: Array<() => void> = [];
@@ -28,12 +80,24 @@
   }
 
   onMount(async () => {
+    // Restore theme preference
+    const savedTheme = localStorage.getItem("translens_theme");
+    if (savedTheme === "dark") {
+      isDark = true;
+      document.documentElement.classList.add("theme-dark");
+      document.documentElement.classList.remove("theme-light");
+    } else {
+      isDark = false;
+      document.documentElement.classList.add("theme-light");
+      document.documentElement.classList.remove("theme-dark");
+    }
+
     await getWin();
 
     // Setup blur → auto-hide (unless pinned)
     await setupBlurHandler();
 
-    // Clipboard monitor lifecycle: start when visible, stop when hidden
+    // Clipboard monitor lifecycle
     const w = await getWin();
     w.listen("tauri://focus", () => startClipMonitor());
     w.listen("tauri://blur", () => { if (!isPinned) stopClipMonitor(); });
@@ -43,8 +107,18 @@
       await listen<string>("translate-text", (event) => {
         sourceText = event.payload;
         lastClipText = event.payload;
-        translatedText = "";
         showOriginal = false;
+
+        // Check cache first
+        const cached = getCache(event.payload, targetLang);
+        if (cached !== null) {
+          translatedText = cached;
+          isTranslating = false;
+          return;
+        }
+
+        // Not cached — start translation
+        translatedText = "";
         isTranslating = true;
         translate();
       })
@@ -61,6 +135,8 @@
     unlisteners.push(
       await listen<void>("translation-done", () => {
         isTranslating = false;
+        // Cache result
+        setCache(sourceText, translatedText, targetLang);
       })
     );
   });
@@ -69,6 +145,22 @@
     unlisteners.forEach((u) => u());
     stopClipMonitor();
   });
+
+  // --- Theme toggle ---
+
+  function toggleTheme() {
+    isDark = !isDark;
+    const root = document.documentElement;
+    if (isDark) {
+      root.classList.remove("theme-light");
+      root.classList.add("theme-dark");
+      localStorage.setItem("translens_theme", "dark");
+    } else {
+      root.classList.remove("theme-dark");
+      root.classList.add("theme-light");
+      localStorage.setItem("translens_theme", "light");
+    }
+  }
 
   // --- Translation ---
 
@@ -140,6 +232,17 @@
         }
         if (text && text !== lastClipText && text !== sourceText) {
           lastClipText = text;
+
+          // Check cache for clipboard auto-translate
+          const cached = getCache(text, targetLang);
+          if (cached !== null) {
+            sourceText = text;
+            translatedText = cached;
+            showOriginal = false;
+            isTranslating = false;
+            return;
+          }
+
           sourceText = text;
           translatedText = "";
           showOriginal = false;
@@ -219,7 +322,7 @@
   onkeydown={handleKeyDown}
 />
 
-<div class="window">
+<div class="window" class:theme-dark={isDark} class:theme-light={!isDark}>
   <!-- Title bar — draggable via native Tauri region -->
   <div class="titlebar" data-tauri-drag-region>
     <div class="titlebar-left">
@@ -260,6 +363,9 @@
       {/if}
       <span class="flex-1"></span>
       <button class="copy-btn" onclick={() => copyText(translatedText)} title="复制译文">📋</button>
+      {#if !isTranslating && translatedText && getCache(sourceText, targetLang) !== null}
+        <span class="cached-badge">💾</span>
+      {/if}
     </div>
     <div class="text-content selectable">
       {#if isTranslating}
@@ -288,13 +394,18 @@
       <button class="tool-btn text-btn active" onclick={() => showOriginal = false}>原文 ✓</button>
     {/if}
 
+    <span class="flex-1"></span>
+
     {#if isPinned}
-      <span class="pin-badge pinned">📌 已固定 · 监听中</span>
+      <span class="pin-badge pinned">📌 已固定</span>
     {:else}
       <span class="pin-badge auto-hide">失焦隐藏</span>
     {/if}
 
-    <span class="flex-1"></span>
+    <button class="tool-btn theme-btn" onclick={toggleTheme} title={isDark ? '切换亮色' : '切换暗色'}>
+      {isDark ? '☀️' : '🌙'}
+    </button>
+
     <span class="lang-badge">{targetLang === "zh-CN" ? "中" : "EN"}</span>
   </div>
 </div>
@@ -309,6 +420,7 @@
     border-radius: 10px;
     overflow: hidden;
     cursor: default;
+    box-shadow: 0 8px 32px var(--shadow);
   }
 
   .titlebar {
@@ -327,7 +439,6 @@
     color: var(--text-secondary);
     letter-spacing: 1px;
     text-transform: uppercase;
-    /* Make title center a secondary drag target */
     -webkit-app-region: drag;
   }
 
@@ -350,7 +461,7 @@
     transition: all 0.15s;
   }
   .icon-btn:hover {
-    background: rgba(255,255,255,0.1);
+    background: rgba(128,128,128,0.15);
     color: var(--text);
   }
   .icon-btn.active {
@@ -406,7 +517,7 @@
   .copy-btn {
     background: none;
     border: none;
-    color: var(--accent);
+    color: var(--text-secondary);
     cursor: pointer;
     font-size: 11px;
     padding: 0;
@@ -415,6 +526,13 @@
   }
   .copy-btn:hover {
     opacity: 1;
+    color: var(--accent);
+  }
+
+  .cached-badge {
+    font-size: 10px;
+    opacity: 0.4;
+    margin-left: auto;
   }
 
   .flex-1 { flex: 1; }
@@ -439,13 +557,12 @@
   }
 
   .loading {
-    color: var(--text-secondary);
+    color: var(--loading-color);
     animation: pulse 1.5s ease infinite;
   }
 
   .empty-hint {
-    color: var(--text-secondary);
-    opacity: 0.4;
+    color: var(--empty-hint);
     font-style: italic;
     font-size: 13px;
   }
@@ -459,7 +576,7 @@
     display: flex;
     align-items: center;
     padding: 6px 10px;
-    background: var(--surface);
+    background: var(--toolbar-bg);
     gap: 4px;
     flex-shrink: 0;
   }
@@ -475,7 +592,7 @@
     transition: all 0.15s;
   }
   .tool-btn:hover {
-    background: rgba(255,255,255,0.1);
+    background: rgba(128,128,128,0.12);
     color: var(--text);
   }
 
@@ -487,6 +604,11 @@
   .tool-btn.text-btn.active {
     border-color: var(--accent);
     color: var(--accent);
+  }
+
+  .theme-btn {
+    font-size: 14px;
+    padding: 2px 6px;
   }
 
   .lang-badge {
@@ -505,10 +627,13 @@
   }
   .pin-badge.pinned {
     background: rgba(255,215,0,0.15);
-    color: #ffd700;
+    color: #b8960f;
+  }
+  .theme-light .pin-badge.pinned {
+    background: rgba(255,215,0,0.2);
   }
   .pin-badge.auto-hide {
-    background: rgba(255,255,255,0.05);
+    background: rgba(128,128,128,0.08);
     color: var(--text-secondary);
   }
 </style>

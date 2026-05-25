@@ -7,12 +7,8 @@ fn default_window_pos() -> i32 { -1 }
 pub struct AppConfig {
     pub target_language: String,
     pub auto_detect_source: bool,
-    pub show_overlay_button: bool,
-    pub overlay_timeout_ms: u64,
-    pub text_selection_detection: bool,
     pub close_on_esc: bool,
     pub close_on_lose_focus: bool,
-    pub start_with_windows: bool,
 
     pub deepseek_api_key: String,
     pub deepseek_base_url: String,
@@ -35,12 +31,8 @@ impl Default for AppConfig {
         Self {
             target_language: "zh-CN".to_string(),
             auto_detect_source: true,
-            show_overlay_button: true,
-            overlay_timeout_ms: 5000,
-            text_selection_detection: true,
             close_on_esc: true,
             close_on_lose_focus: false,
-            start_with_windows: false,
 
             deepseek_api_key: String::new(),
             deepseek_base_url: "https://api.deepseek.com/v1".to_string(),

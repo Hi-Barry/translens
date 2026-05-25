@@ -9,8 +9,6 @@
   let model = $state("deepseek-chat");
   let temperature = $state(0.1);
   let targetLang = $state("zh-CN");
-  let showOverlay = $state(true);
-  let textSelectionDetection = $state(true);
   let closeOnEsc = $state(true);
   let theme = $state("system");
   let font_size = $state(14);
@@ -28,8 +26,6 @@
       model = config.deepseek_model || "deepseek-chat";
       temperature = config.deepseek_temperature ?? 0.1;
       targetLang = config.target_language || "zh-CN";
-      showOverlay = config.show_overlay_button ?? true;
-      textSelectionDetection = config.text_selection_detection ?? true;
       closeOnEsc = config.close_on_esc ?? true;
       theme = config.theme || "system";
       font_size = config.font_size || 14;
@@ -48,12 +44,8 @@
         config: {
           target_language: targetLang,
           auto_detect_source: true,
-          show_overlay_button: showOverlay,
-          text_selection_detection: textSelectionDetection,
-          overlay_timeout_ms: 5000,
           close_on_esc: closeOnEsc,
           close_on_lose_focus: false,
-          start_with_windows: false,
           deepseek_api_key: apiKey,
           deepseek_base_url: baseUrl,
           deepseek_model: model,
@@ -174,17 +166,15 @@
   </div>
 
   <div class="section">
+    <h2>快捷键</h2>
+    <div class="hotkey-info">
+      <code>Alt + Shift + T</code>
+      <span>弹出翻译窗口（需先复制文本到剪贴板）</span>
+    </div>
+  </div>
+
+  <div class="section">
     <h2>行为</h2>
-
-    <label class="field checkbox">
-      <input type="checkbox" bind:checked={textSelectionDetection} />
-      <span>启用文本选中检测（自动检测选中的文本）</span>
-    </label>
-
-    <label class="field checkbox">
-      <input type="checkbox" bind:checked={showOverlay} />
-      <span>选中文本后显示浮动翻译按钮</span>
-    </label>
 
     <label class="field checkbox">
       <input type="checkbox" bind:checked={closeOnEsc} />
@@ -323,6 +313,29 @@
     font-family: monospace;
     font-size: 13px;
     color: var(--accent);
+  }
+
+  .hotkey-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .hotkey-info code {
+    font-size: 14px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .hotkey-info span {
+    font-size: 13px;
+    color: var(--text-secondary);
   }
 
   .footer {

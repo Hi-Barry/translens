@@ -267,3 +267,54 @@ npm run build
 # CI 调试（在 build-windows job 中）
 cargo check 2>&1 | tee check.log
 ```
+
+---
+
+## 2026-05-25 — 重构：移除 Windows 钩子，改用全局快捷键
+
+### 背景
+- Windows 钩子（UIA + WinEventHook）过于复杂，反复实现未能稳定工作
+- 改为「快捷键触发」方案，用户手动复制文本后按热键调出翻译
+
+### 改动清单
+
+**删除了：**
+- `src-tauri/src/detection/` — 整个模块（win.rs, uia_hook.rs, stub.rs, mod.rs）
+- `src-tauri/src/overlay/` — 整个模块（win.rs, stub.rs, mod.rs）
+- `src/lib/OverlayButton.svelte` — 浮动翻译按钮
+- `src/overlay-main.ts` — overlay 入口
+- `overlay.html` — overlay 页面
+- `Cargo.toml` 中的 `windows = "0.60"` crate（不再需要）
+- 配置项：`show_overlay_button`, `text_selection_detection`, `overlay_timeout_ms`
+
+**新增了：**
+- `tauri-plugin-global-shortcut = "2"` — 全局快捷键插件
+- `Alt+Shift+T` 全局快捷键注册
+  - Rust 侧处理：热键按下 → 读取剪贴板文本 → 判断是否为文本 → 弹出翻译窗口
+  - 非文本内容（图片、文件等）自动忽略，不弹窗
+- 原文默认隐藏，点击「显示原文」按钮切换
+- 剪贴板变化自动监听（窗口可见时 1.5s 轮询）
+  - 窗口 focus → 开始监听，blur → 停止监听
+  - Pin 住时保持监听不受 blur 影响
+
+**修改了：**
+- `src/App.svelte` — 原文区折叠、剪贴板监听生命周期调整、空状态提示
+- `src/lib/SettingsPage.svelte` — 移除过时选项，添加快捷键说明
+- `vite.config.ts` — 移除 overlay.html 入口
+- `capabilities/default.json` — 添加 global-shortcut 权限
+- `config/store.rs` — 简化配置结构
+
+### 用户流程
+
+```
+1. 选中文字 → Ctrl+C 复制到剪贴板
+2. 按 Alt+Shift+T → 弹出翻译窗口，显示译文（原文默认隐藏）
+3. 想看原文 → 点「显示原文」按钮
+4. 窗口保持可见时，剪贴板变化自动重新翻译
+5. ESC → 隐藏窗口（Pin 住时 ESC 不生效）
+```
+
+### 注意事项
+- `clipboard-manager` 的 `.read_text().ok()` 返回 `Option<String>`，不需要 `.flatten()`（不用 `windows` crate 的旧写法）
+- `tauri-plugin-global-shortcut` 的 API：`on_shortcut(shortcut, handler)` 两个参数，handler 签名为 `Fn(&AppHandle<R>, &Shortcut, ShortcutEvent)`
+- `ShortcutState::Pressed` 用于判断按键按下，不是 `ShortcutEvent::Pressed`

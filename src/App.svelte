@@ -7,15 +7,16 @@
   let translatedText = $state("");
   let isTranslating = $state(false);
   let isPinned = $state(false);
+  let showOriginal = $state(false);
   let targetLang = $state("zh-CN");
 
   // --- Drag state (Ctrl+Click, uses Tauri's native startDragging) ---
   let isDragging = $state(false);
   let ctrlHeld = $state(false);
 
-  // --- Clipboard monitor (when pinned) ---
+  // --- Clipboard monitor (when visible) ---
   let clipMonitorInterval: ReturnType<typeof setInterval> | null = null;
-  let lastClipText = "";
+  let lastClipText = $state("");
 
   // --- Tauri event listeners ---
   let unlisteners: Array<() => void> = [];
@@ -31,13 +32,12 @@
   }
 
   onMount(async () => {
-    // Cache window handle
     await getWin();
 
     // Setup blur → auto-hide (unless pinned)
     await setupBlurHandler();
 
-    // Save window position to localStorage on every move
+    // Save window position on every move
     const w2 = await getWin();
     w2.listen("tauri://move", async () => {
       try {
@@ -47,12 +47,25 @@
       } catch { /* ignore */ }
     });
 
-    // Receive text to translate (from tray or overlay click)
+    // Start clipboard monitor when window becomes visible
+    w2.listen("tauri://focus", () => {
+      startClipMonitor();
+    });
+
+    // Stop clipboard monitor when window loses focus (will restart on next show)
+    w2.listen("tauri://blur", () => {
+      if (!isPinned) {
+        stopClipMonitor();
+      }
+    });
+
+    // Receive text to translate (from hotkey or tray)
     unlisteners.push(
       await listen<string>("translate-text", (event) => {
         sourceText = event.payload;
         lastClipText = event.payload;
         translatedText = "";
+        showOriginal = false;
         isTranslating = true;
 
         // Restore saved window position from localStorage
@@ -69,32 +82,6 @@
         }
 
         translate();
-      })
-    );
-
-    // Listen for selection-detected events (when translator is pinned)
-    unlisteners.push(
-      await listen("selection-detected", (event) => {
-        // If the translator window is pinned and visible, auto-translate
-        // new selections without needing to click the overlay button
-        if (isPinned) {
-          const payload = event.payload as any;
-          if (payload?.text && typeof payload.text === "string") {
-            const text = payload.text as string;
-            if (text !== sourceText) {
-              sourceText = text;
-              translatedText = "";
-              isTranslating = true;
-              translate();
-            }
-          }
-        }
-      })
-    );
-
-    unlisteners.push(
-      await listen("selection-cleared", () => {
-        // Optionally clear or hide when selection is gone
       })
     );
 
@@ -164,6 +151,7 @@
 
   async function hideWindow() {
     await savePosition();
+    stopClipMonitor();
     const w = await getWin();
     await w.hide();
   }
@@ -171,13 +159,19 @@
   function togglePin() {
     isPinned = !isPinned;
     if (isPinned) {
+      // Ensure clipboard monitor keeps running even when blurred
       startClipMonitor();
     } else {
-      stopClipMonitor();
+      // If window is not focused, stop monitoring
+      (async () => {
+        const w = await getWin();
+        const focused = await w.isFocused();
+        if (!focused) stopClipMonitor();
+      })();
     }
   }
 
-  // --- Clipboard monitor (when pinned) ---
+  // --- Clipboard monitor (when window visible or pinned) ---
 
   function startClipMonitor() {
     if (clipMonitorInterval) return;
@@ -196,6 +190,7 @@
           lastClipText = text;
           sourceText = text;
           translatedText = "";
+          showOriginal = false;
           isTranslating = true;
           translate();
         }
@@ -213,8 +208,6 @@
   }
 
   // --- Auto-hide on blur (unless pinned) ---
-  // Uses a 200ms debounce: resizing the window briefly blurs it;
-  // we hide only if the window stays unfocused after the delay.
   let blurSetupDone = false;
   let blurTimer: ReturnType<typeof setTimeout> | null = null;
   async function setupBlurHandler() {
@@ -242,8 +235,6 @@
   }
 
   // --- Custom Ctrl+Click drag via Tauri native API ---
-  // Uses window.startDragging() which handles the entire drag natively
-  // (no manual setPosition, RAF, or coordinate math needed).
 
   async function handleMouseDown(e: MouseEvent) {
     if (!ctrlHeld) return;
@@ -254,15 +245,12 @@
     try {
       const w = await getWin();
       await w.startDragging();
-      // startDragging resolves when native drag ends — save final position
       await savePosition();
     } catch (err) {
       console.error("startDragging:", err);
     }
     isDragging = false;
   }
-
-  // startDragging is modal — mousemove/up aren't needed
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape" && !isPinned) {
@@ -308,7 +296,7 @@
 />
 
 <div class="window">
-  <!-- Title bar (drag is handled by Ctrl+Click, data-tauri-drag-region is not used) -->
+  <!-- Title bar -->
   <div class="titlebar">
     <div class="titlebar-left">
       <button
@@ -326,21 +314,28 @@
     </div>
   </div>
 
-  <!-- Source text -->
-  <div class="section source-section">
-    <div class="section-label">
-      原文
-      <button class="copy-btn" onclick={() => copyText(sourceText)} title="复制原文">📋</button>
+  <!-- Source text (hidden by default) -->
+  {#if showOriginal}
+    <div class="section source-section">
+      <div class="section-label">
+        原文
+        <button class="link-btn" onclick={() => showOriginal = false}>隐藏原文 ✕</button>
+        <span class="flex-1"></span>
+        <button class="copy-btn" onclick={() => copyText(sourceText)} title="复制原文">📋</button>
+      </div>
+      <div class="text-content selectable">{sourceText}</div>
     </div>
-    <div class="text-content selectable">{sourceText}</div>
-  </div>
+    <div class="divider"></div>
+  {/if}
 
-  <div class="divider"></div>
-
-  <!-- Translation result -->
-  <div class="section result-section">
+  <!-- Translation result (always visible) -->
+  <div class="section result-section" class:is-full={!showOriginal}>
     <div class="section-label">
-      翻译 ({targetLang === "zh-CN" ? "中文" : "English"})
+      {showOriginal ? '翻译' : '译文'} ({targetLang === "zh-CN" ? "中文" : "English"})
+      {#if !showOriginal && sourceText}
+        <button class="link-btn" onclick={() => showOriginal = true}>显示原文</button>
+      {/if}
+      <span class="flex-1"></span>
       <button class="copy-btn" onclick={() => copyText(translatedText)} title="复制译文">📋</button>
     </div>
     <div class="text-content selectable">
@@ -352,6 +347,8 @@
         {/if}
       {:else if translatedText}
         {translatedText}
+      {:else}
+        <span class="empty-hint">复制文本后按 Alt+Shift+T 翻译</span>
       {/if}
     </div>
   </div>
@@ -362,11 +359,15 @@
     <button class="tool-btn" onclick={() => copyText(translatedText)} title="复制译文">📋</button>
     <button class="tool-btn" onclick={switchLang} title="切换语言">🔄</button>
 
+    {#if !showOriginal && sourceText}
+      <button class="tool-btn text-btn" onclick={() => showOriginal = true}>原文</button>
+    {:else if showOriginal}
+      <button class="tool-btn text-btn active" onclick={() => showOriginal = false}>原文 ✓</button>
+    {/if}
+
     {#if isPinned}
-      <!-- When pinned, show monitoring indicator -->
       <span class="pin-badge pinned">📌 已固定 · 监听中</span>
     {:else}
-      <!-- When not pinned, show blur auto-hide hint -->
       <span class="pin-badge auto-hide">失焦隐藏</span>
     {/if}
 
@@ -440,9 +441,21 @@
 
   .section {
     padding: 10px 14px;
-    flex: 1;
     overflow-y: auto;
     min-height: 0;
+  }
+
+  .source-section {
+    flex: 0 0 auto;
+    max-height: 35vh;
+  }
+
+  .result-section {
+    flex: 1;
+  }
+
+  .result-section.is-full {
+    flex: 1;
   }
 
   .section-label {
@@ -454,6 +467,21 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .link-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+  .link-btn:hover {
+    opacity: 1;
+    text-decoration: underline;
   }
 
   .copy-btn {
@@ -469,6 +497,8 @@
   .copy-btn:hover {
     opacity: 1;
   }
+
+  .flex-1 { flex: 1; }
 
   .text-content {
     font-size: 14px;
@@ -492,6 +522,13 @@
   .loading {
     color: var(--text-secondary);
     animation: pulse 1.5s ease infinite;
+  }
+
+  .empty-hint {
+    color: var(--text-secondary);
+    opacity: 0.4;
+    font-style: italic;
+    font-size: 13px;
   }
 
   @keyframes pulse {
@@ -523,7 +560,15 @@
     color: var(--text);
   }
 
-  .flex-1 { flex: 1; }
+  .tool-btn.text-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+  }
+  .tool-btn.text-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
 
   .lang-badge {
     font-size: 11px;

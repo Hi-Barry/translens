@@ -63,37 +63,7 @@ pub async fn translate_text(
     Ok(())
 }
 
-/// Capture selected text from clipboard + open translator window
-#[tauri::command]
-pub async fn capture_and_translate(app: AppHandle) -> Result<(), String> {
-    // Try to capture selected text (Windows only, returns None on Linux)
-    let text = crate::detection::capture_selected_text(&app);
-
-    let text = match text {
-        Some(t) if !t.trim().is_empty() => t,
-        _ => {
-            // If no text captured via Ctrl+C, try direct clipboard read
-            #[cfg(target_os = "windows")]
-            {
-                let clip_text = crate::detection::read_clipboard_text(&app).unwrap_or_default();
-                if !clip_text.trim().is_empty() {
-                    clip_text
-                } else {
-                    return Err("未检测到选中文本，请先选择文本后重试".to_string());
-                }
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                return Err("文本捕获仅在 Windows 平台可用".to_string());
-            }
-        }
-    };
-
-    // Show the translator window
-    show_translator_window_inner(app, text, 0, 0).await
-}
-
-/// Show the translation popup window
+/// Show the translation popup window with the given text
 #[tauri::command]
 pub async fn show_translator_window(
     app: AppHandle,
@@ -104,8 +74,7 @@ pub async fn show_translator_window(
     show_translator_window_inner(app, text, x, y).await
 }
 
-/// Show the translator window with the given text at given screen position.
-/// Public so overlay::win can call it directly.
+/// Internal: show translator window, position it, emit translate-text event
 pub async fn show_translator_window_inner(
     app: AppHandle,
     text: String,
@@ -203,26 +172,5 @@ pub fn save_config(
     config.save();
     let mut current = state.config.lock().map_err(|e| e.to_string())?;
     *current = config;
-    Ok(())
-}
-
-/// Show the overlay translate button at given position
-#[tauri::command]
-pub fn show_overlay_button(app: AppHandle, x: i32, y: i32, text: String) -> Result<(), String> {
-    crate::overlay::show_button(app, x, y, text);
-    Ok(())
-}
-
-/// Hide the overlay translate button
-#[tauri::command]
-pub fn hide_overlay_button(app: AppHandle) -> Result<(), String> {
-    crate::overlay::hide_button(&app);
-    Ok(())
-}
-
-/// Handle overlay button click — open translator with stored text
-#[tauri::command]
-pub fn overlay_click(app: AppHandle) -> Result<(), String> {
-    crate::overlay::on_overlay_click(&app);
     Ok(())
 }

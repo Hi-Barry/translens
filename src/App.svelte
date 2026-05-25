@@ -10,10 +10,6 @@
   let showOriginal = $state(false);
   let targetLang = $state("zh-CN");
 
-  // --- Drag state (Ctrl+Click, uses Tauri's native startDragging) ---
-  let isDragging = $state(false);
-  let ctrlHeld = $state(false);
-
   // --- Clipboard monitor (when visible) ---
   let clipMonitorInterval: ReturnType<typeof setInterval> | null = null;
   let lastClipText = $state("");
@@ -37,27 +33,10 @@
     // Setup blur → auto-hide (unless pinned)
     await setupBlurHandler();
 
-    // Save window position on every move
-    const w2 = await getWin();
-    w2.listen("tauri://move", async () => {
-      try {
-        const pos = await w2.position();
-        localStorage.setItem("translens_win_x", String(pos.x));
-        localStorage.setItem("translens_win_y", String(pos.y));
-      } catch { /* ignore */ }
-    });
-
-    // Start clipboard monitor when window becomes visible
-    w2.listen("tauri://focus", () => {
-      startClipMonitor();
-    });
-
-    // Stop clipboard monitor when window loses focus (will restart on next show)
-    w2.listen("tauri://blur", () => {
-      if (!isPinned) {
-        stopClipMonitor();
-      }
-    });
+    // Clipboard monitor lifecycle: start when visible, stop when hidden
+    const w = await getWin();
+    w.listen("tauri://focus", () => startClipMonitor());
+    w.listen("tauri://blur", () => { if (!isPinned) stopClipMonitor(); });
 
     // Receive text to translate (from hotkey or tray)
     unlisteners.push(
@@ -67,20 +46,6 @@
         translatedText = "";
         showOriginal = false;
         isTranslating = true;
-
-        // Restore saved window position from localStorage
-        const sx = localStorage.getItem("translens_win_x");
-        const sy = localStorage.getItem("translens_win_y");
-        if (sx && sy) {
-          (async () => {
-            try {
-              const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
-              const w = await getWin();
-              await w.setPosition(new PhysicalPosition(parseInt(sx), parseInt(sy)));
-            } catch { /* ignore */ }
-          })();
-        }
-
         translate();
       })
     );
@@ -129,7 +94,6 @@
     targetLang = newLang;
 
     if (sourceText && translatedText && !translatedText.startsWith("翻译")) {
-      // Swap: the current translation becomes the new source, re-translate
       const oldTranslation = translatedText;
       sourceText = oldTranslation;
       translatedText = "";
@@ -140,17 +104,7 @@
 
   // --- Window controls ---
 
-  async function savePosition() {
-    try {
-      const w = await getWin();
-      const pos = await w.position();
-      localStorage.setItem("translens_win_x", String(pos.x));
-      localStorage.setItem("translens_win_y", String(pos.y));
-    } catch { /* ignore */ }
-  }
-
   async function hideWindow() {
-    await savePosition();
     stopClipMonitor();
     const w = await getWin();
     await w.hide();
@@ -159,10 +113,8 @@
   function togglePin() {
     isPinned = !isPinned;
     if (isPinned) {
-      // Ensure clipboard monitor keeps running even when blurred
       startClipMonitor();
     } else {
-      // If window is not focused, stop monitoring
       (async () => {
         const w = await getWin();
         const focused = await w.isFocused();
@@ -224,7 +176,6 @@
         blurTimer = null;
       }, 200);
     });
-    // If window regains focus within the delay, cancel hide
     await w.listen("tauri://focus", () => {
       if (blurTimer) {
         clearTimeout(blurTimer);
@@ -234,36 +185,11 @@
     blurSetupDone = true;
   }
 
-  // --- Custom Ctrl+Click drag via Tauri native API ---
-
-  async function handleMouseDown(e: MouseEvent) {
-    if (!ctrlHeld) return;
-    const target = e.target as HTMLElement;
-    if (target.closest("button") || target.closest("input") || target.closest("textarea")) return;
-
-    isDragging = true;
-    try {
-      const w = await getWin();
-      await w.startDragging();
-      await savePosition();
-    } catch (err) {
-      console.error("startDragging:", err);
-    }
-    isDragging = false;
-  }
+  // --- Keyboard ---
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape" && !isPinned) {
       hideWindow();
-    }
-    if (e.key === "Control") {
-      ctrlHeld = true;
-    }
-  }
-
-  function handleKeyUp(e: KeyboardEvent) {
-    if (e.key === "Control") {
-      ctrlHeld = false;
     }
   }
 
@@ -291,13 +217,11 @@
 
 <svelte:window
   onkeydown={handleKeyDown}
-  onkeyup={handleKeyUp}
-  onmousedown={handleMouseDown}
 />
 
 <div class="window">
-  <!-- Title bar -->
-  <div class="titlebar">
+  <!-- Title bar — draggable via native Tauri region -->
+  <div class="titlebar" data-tauri-drag-region>
     <div class="titlebar-left">
       <button
         class="icon-btn {isPinned ? 'active' : ''}"
@@ -306,7 +230,6 @@
       >
         {isPinned ? '📌' : '📍'}
       </button>
-      <span class="ctrl-hint">Ctrl+拖拽</span>
     </div>
     <div class="titlebar-center">TransLens</div>
     <div class="titlebar-right">
@@ -404,6 +327,8 @@
     color: var(--text-secondary);
     letter-spacing: 1px;
     text-transform: uppercase;
+    /* Make title center a secondary drag target */
+    -webkit-app-region: drag;
   }
 
   .titlebar-right,
@@ -411,13 +336,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-  }
-
-  .ctrl-hint {
-    font-size: 10px;
-    color: var(--text-secondary);
-    opacity: 0.5;
-    margin-left: 4px;
+    -webkit-app-region: no-drag;
   }
 
   .icon-btn {

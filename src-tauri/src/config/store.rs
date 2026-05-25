@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 fn default_window_pos() -> i32 { -1 }
+fn default_window_width() -> u32 { 320 }
+fn default_window_height() -> u32 { 420 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -24,6 +26,11 @@ pub struct AppConfig {
     pub window_x: i32,
     #[serde(default = "default_window_pos")]
     pub window_y: i32,
+    // Saved window size (matches tauri.conf.json defaults)
+    #[serde(default = "default_window_width")]
+    pub window_width: u32,
+    #[serde(default = "default_window_height")]
+    pub window_height: u32,
 }
 
 impl Default for AppConfig {
@@ -45,6 +52,8 @@ impl Default for AppConfig {
 
             window_x: -1,
             window_y: -1,
+            window_width: 320,
+            window_height: 420,
         }
     }
 }

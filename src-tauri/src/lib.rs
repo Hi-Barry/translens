@@ -36,6 +36,9 @@ pub fn run() {
             // Register global hotkey: Alt+Shift+T
             register_hotkey(app.handle())?;
 
+            // Track window position & size changes
+            track_window_geometry(app.handle())?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -49,6 +52,38 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running translens");
+}
+
+/// Listen for window move/resize events and persist to config
+fn track_window_geometry(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(window) = app.get_webview_window("translator") {
+        let handle = app.clone();
+        window.on_window_event(move |event| {
+            use tauri::WindowEvent;
+            match event {
+                WindowEvent::Moved(position) => {
+                    if let Some(state) = handle.try_state::<crate::AppState>() {
+                        if let Ok(mut config) = state.config.lock() {
+                            config.window_x = position.x;
+                            config.window_y = position.y;
+                            config.save();
+                        }
+                    }
+                }
+                WindowEvent::Resized(size) => {
+                    if let Some(state) = handle.try_state::<crate::AppState>() {
+                        if let Ok(mut config) = state.config.lock() {
+                            config.window_width = size.width;
+                            config.window_height = size.height;
+                            config.save();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
+    Ok(())
 }
 
 fn register_hotkey(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {

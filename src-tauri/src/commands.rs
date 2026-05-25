@@ -3,7 +3,7 @@ use crate::translator::deepseek::DeepSeekTranslator;
 use crate::AppState;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, PhysicalSize, PhysicalPosition};
 
 #[derive(Serialize, Deserialize)]
 pub struct TranslateRequest {
@@ -74,7 +74,7 @@ pub async fn show_translator_window(
     show_translator_window_inner(app, text, x, y).await
 }
 
-/// Internal: show translator window, position it, emit translate-text event
+/// Internal: show translator window, restore position+size, emit translate-text event
 pub async fn show_translator_window_inner(
     app: AppHandle,
     text: String,
@@ -82,25 +82,26 @@ pub async fn show_translator_window_inner(
     y: i32,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("translator") {
-        // Determine position priority: explicit > saved > center
-        if x != 0 || y != 0 {
-            window
-                .set_position(tauri::PhysicalPosition::new(x, y))
-                .map_err(|e| e.to_string())?;
-        } else {
-            // Check if we have a saved position from a previous session
-            let saved_pos = app.state::<AppState>().config.lock().ok().map(|c| (c.window_x, c.window_y));
-            match saved_pos {
-                Some((sx, sy)) if sx >= 0 && sy >= 0 => {
-                    window
-                        .set_position(tauri::PhysicalPosition::new(sx, sy))
-                        .map_err(|e| e.to_string())?;
-                }
-                _ => {
-                    let _ = window.center();
-                }
-            }
+        // Read saved geometry from config (do this before any set operations)
+        let state = app.state::<AppState>();
+        let guard = state.config.lock().map_err(|e| e.to_string())?;
+        let (sx, sy, sw, sh) = (guard.window_x, guard.window_y, guard.window_width, guard.window_height);
+        drop(guard);
+
+        // Restore size first (position depends on size for centering)
+        if sw > 0 && sh > 0 {
+            let _ = window.set_size(PhysicalSize::new(sw, sh));
         }
+
+        // Determine position: explicit > saved > center
+        if x != 0 || y != 0 {
+            let _ = window.set_position(PhysicalPosition::new(x, y));
+        } else if sx >= 0 && sy >= 0 {
+            let _ = window.set_position(PhysicalPosition::new(sx, sy));
+        } else {
+            let _ = window.center();
+        }
+
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         app.emit("translate-text", &text)
@@ -149,7 +150,7 @@ pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
     state.config.lock().map(|c| c.clone()).map_err(|e| e.to_string())
 }
 
-/// Save window position (called from frontend after drag)
+/// Save window position (deprecated — now handled by on_window_event, kept for API compat)
 #[tauri::command]
 pub fn save_window_position(
     state: State<'_, AppState>,

@@ -3,7 +3,9 @@ mod config;
 mod translator;
 
 use config::AppConfig;
+use std::cell::Cell;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{
     AppHandle, Manager,
     menu::{Menu, MenuItem},
@@ -58,6 +60,7 @@ pub fn run() {
 fn track_window_geometry(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(window) = app.get_webview_window("translator") {
         let handle = app.clone();
+        let last_save = Cell::new(Instant::now());
         window.on_window_event(move |event| {
             use tauri::WindowEvent;
             match event {
@@ -66,7 +69,10 @@ fn track_window_geometry(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
                         if let Ok(mut config) = state.config.lock() {
                             config.window_x = position.x;
                             config.window_y = position.y;
-                            config.save();
+                            if last_save.get().elapsed() >= Duration::from_millis(500) {
+                                config.save();
+                                last_save.set(Instant::now());
+                            }
                         }
                     }
                 }
@@ -75,7 +81,10 @@ fn track_window_geometry(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
                         if let Ok(mut config) = state.config.lock() {
                             config.window_width = size.width;
                             config.window_height = size.height;
-                            config.save();
+                            if last_save.get().elapsed() >= Duration::from_millis(500) {
+                                config.save();
+                                last_save.set(Instant::now());
+                            }
                         }
                     }
                 }
